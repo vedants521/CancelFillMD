@@ -39,40 +39,40 @@ class FirebaseDB:
         self.db = init_firebase()
     
     def get_appointments(self, status=None, date=None):
-        """Get appointments with optional filtering"""
-        if not self.db:
-            # Return demo data if no Firebase connection
-            appointments = self._get_demo_appointments()
-        else:
-            try:
-                appointments = []
-                # Start with base collection
-                collection_ref = self.db.collection('appointments')
-                
-                # Apply filters if provided
-                query = collection_ref
-                if status:
-                    query = query.where('status', '==', status)
-                if date:
-                    query = query.where('date', '==', date)
-                
-                # Execute query
-                docs = query.stream()
-                for doc in docs:
-                    appointment = doc.to_dict()
-                    appointment['id'] = doc.id
-                    appointments.append(appointment)
-            except Exception as e:
-                st.error(f"Error fetching appointments: {str(e)}")
-                appointments = self._get_demo_appointments()
-        
-        # Apply filters to results if using demo data
-        if status:
-            appointments = [apt for apt in appointments if apt.get('status') == status]
-        if date:
-            appointments = [apt for apt in appointments if apt.get('date') == date]
+    """Get appointments with optional filtering"""
+    if not self.db:
+        # Return demo data if no Firebase connection
+        appointments = self._get_demo_appointments()
+    else:
+        try:
+            appointments = []
+            # Start with base collection
+            collection_ref = self.db.collection('appointments')
             
-        return appointments
+            # Apply filters if provided
+            query = collection_ref
+            if status:
+                query = query.where('status', '==', status)
+            if date:
+                query = query.where('date', '==', date)
+            
+            # Execute query
+            docs = query.stream()
+            for doc in docs:
+                appointment = doc.to_dict()
+                appointment['id'] = doc.id
+                appointments.append(appointment)
+        except Exception as e:
+            st.error(f"Error fetching appointments: {str(e)}")
+            appointments = self._get_demo_appointments()
+    
+    # Apply filters to results if using demo data
+    if status:
+        appointments = [apt for apt in appointments if apt.get('status') == status]
+    if date:
+        appointments = [apt for apt in appointments if apt.get('date') == date]
+        
+    return appointments
     
     def _get_demo_appointments(self):
         """Return demo appointments for testing"""
