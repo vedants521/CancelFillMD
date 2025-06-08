@@ -12,4 +12,3 @@ reportlab
 PyJWT
 phonenumbers
 names
-pytest
