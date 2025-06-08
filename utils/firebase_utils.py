@@ -1,92 +1,183 @@
 import firebase_admin
-from firebase_admin import credentials, db
-import os
-import json
-from datetime import datetime, timedelta
+from firebase_admin import credentials, firestore
 import streamlit as st
+import json
+import os
 
-# Initialize Firebase (only once)
 @st.cache_resource
 def init_firebase():
-    if not firebase_admin._apps:
-        cred = credentials.Certificate('firebase-key.json')
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': 'https://cancelfillmd-pro-default-rtdb.firebaseio.com/'
-        })
-    return db
+    """Initialize Firebase connection using Streamlit secrets or environment variables"""
+    try:
+        if not firebase_admin._apps:
+            # Try to use Streamlit secrets first
+            if "firebase" in st.secrets:
+                # Create credentials from secrets
+                firebase_config = dict(st.secrets["firebase"])
+                cred = credentials.Certificate(firebase_config)
+            # Try environment variable
+            elif os.getenv('FIREBASE_CREDENTIALS'):
+                firebase_config = json.loads(os.getenv('FIREBASE_CREDENTIALS'))
+                cred = credentials.Certificate(firebase_config)
+            # Try local file (for development)
+            elif os.path.exists('firebase-key.json'):
+                cred = credentials.Certificate('firebase-key.json')
+            else:
+                # Use demo mode
+                st.warning("No Firebase credentials found. Running in demo mode.")
+                return None
+            
+            firebase_admin.initialize_app(cred)
+        
+        return firestore.client()
+    except Exception as e:
+        st.error(f"Failed to initialize Firebase: {str(e)}")
+        return None
 
-# Database operations
 class FirebaseDB:
     def __init__(self):
         self.db = init_firebase()
     
-    def add_to_waitlist(self, patient_data):
-        """Add patient to waitlist"""
-        ref = self.db.reference('waitlist')
-        new_ref = ref.push(patient_data)
-        return new_ref.key
+    def get_appointments(self):
+        """Get all appointments"""
+        if not self.db:
+            # Return demo data if no Firebase connection
+            return self._get_demo_appointments()
+        
+        try:
+            appointments = []
+            docs = self.db.collection('appointments').stream()
+            for doc in docs:
+                appointment = doc.to_dict()
+                appointment['id'] = doc.id
+                appointments.append(appointment)
+            return appointments
+        except Exception as e:
+            st.error(f"Error fetching appointments: {str(e)}")
+            return []
     
-    def get_waitlist(self, specialty=None, date=None):
-        """Get waitlist patients with filters"""
-        ref = self.db.reference('waitlist')
-        all_patients = ref.get() or {}
+    def _get_demo_appointments(self):
+        """Return demo appointments for testing"""
+        from datetime import datetime, timedelta
         
-        filtered = []
-        for key, patient in all_patients.items():
-            if specialty and patient.get('specialty') != specialty:
-                continue
-            if date and date not in patient.get('preferred_dates', []):
-                continue
-            patient['id'] = key
-            filtered.append(patient)
+        demo_appointments = []
+        today = datetime.now().date()
         
-        return filtered
+        for i in range(10):
+            date = today + timedelta(days=i)
+            demo_appointments.append({
+                'id': f'demo_{i}',
+                'patient_name': f'Demo Patient {i}',
+                'patient_id': f'P00{i}',
+                'date': date.strftime('%Y-%m-%d'),
+                'time': f'{9 + i % 8}:00 AM',
+                'doctor': f'Dr. Demo {i % 3}',
+                'specialty': ['General Practice', 'Cardiology', 'Dermatology'][i % 3],
+                'status': ['scheduled', 'cancelled', 'filled'][i % 3],
+                'created_at': datetime.now().isoformat()
+            })
+        
+        return demo_appointments
+    
+    def get_waitlist(self):
+        """Get all waitlist entries"""
+        if not self.db:
+            return self._get_demo_waitlist()
+        
+        try:
+            waitlist = []
+            docs = self.db.collection('waitlist').stream()
+            for doc in docs:
+                entry = doc.to_dict()
+                entry['id'] = doc.id
+                waitlist.append(entry)
+            return waitlist
+        except Exception as e:
+            st.error(f"Error fetching waitlist: {str(e)}")
+            return []
+    
+    def _get_demo_waitlist(self):
+        """Return demo waitlist for testing"""
+        demo_waitlist = []
+        
+        for i in range(20):
+            demo_waitlist.append({
+                'id': f'wait_{i}',
+                'patient_name': f'Waitlist Patient {i}',
+                'patient_id': f'W00{i}',
+                'phone': f'+1555000{1000 + i}',
+                'email': f'patient{i}@demo.com',
+                'specialty': ['General Practice', 'Cardiology', 'Dermatology', 'Orthopedics'][i % 4],
+                'flexibility': ['Very Flexible', 'Somewhat Flexible', 'Not Flexible'][i % 3],
+                'preferred_times': ['Morning', 'Afternoon', 'Evening'][i % 3],
+                'created_at': datetime.now().isoformat()
+            })
+        
+        return demo_waitlist
     
     def add_appointment(self, appointment_data):
-        """Add new appointment"""
-        ref = self.db.reference('appointments')
-        new_ref = ref.push(appointment_data)
-        return new_ref.key
-    
-    def update_appointment(self, appointment_id, updates):
-        """Update appointment status"""
-        ref = self.db.reference(f'appointments/{appointment_id}')
-        ref.update(updates)
-    
-    def get_appointments(self, status=None, date=None):
-        """Get appointments with filters"""
-        ref = self.db.reference('appointments')
-        all_appointments = ref.get() or {}
+        """Add a new appointment"""
+        if not self.db:
+            st.success("Demo mode: Appointment would be added")
+            return True
         
-        filtered = []
-        for key, apt in all_appointments.items():
-            if status and apt.get('status') != status:
-                continue
-            if date and apt.get('date') != date:
-                continue
-            apt['id'] = key
-            filtered.append(apt)
-        
-        return filtered
+        try:
+            self.db.collection('appointments').add(appointment_data)
+            return True
+        except Exception as e:
+            st.error(f"Error adding appointment: {str(e)}")
+            return False
     
-    def log_notification(self, notification_data):
-        """Log notification sent"""
-        ref = self.db.reference('notifications')
-        ref.push(notification_data)
+    def update_appointment(self, appointment_id, update_data):
+        """Update an appointment"""
+        if not self.db:
+            st.success("Demo mode: Appointment would be updated")
+            return True
+        
+        try:
+            self.db.collection('appointments').document(appointment_id).update(update_data)
+            return True
+        except Exception as e:
+            st.error(f"Error updating appointment: {str(e)}")
+            return False
     
-    def create_booking_link(self, appointment_id, patient_id):
-        """Create secure booking link"""
-        import uuid
-        token = str(uuid.uuid4())
+    def add_to_waitlist(self, waitlist_data):
+        """Add patient to waitlist"""
+        if not self.db:
+            st.success("Demo mode: Patient would be added to waitlist")
+            return True
         
-        ref = self.db.reference('booking_tokens')
-        ref.push({
-            'token': token,
-            'appointment_id': appointment_id,
-            'patient_id': patient_id,
-            'created_at': datetime.now().isoformat(),
-            'expires_at': (datetime.now() + timedelta(hours=2)).isoformat(),
-            'used': False
-        })
+        try:
+            self.db.collection('waitlist').add(waitlist_data)
+            return True
+        except Exception as e:
+            st.error(f"Error adding to waitlist: {str(e)}")
+            return False
+    
+    def get_notifications(self):
+        """Get all notifications"""
+        if not self.db:
+            return []
         
-        return f"{os.getenv('APP_URL')}/booking?token={token}"
+        try:
+            notifications = []
+            docs = self.db.collection('notifications').stream()
+            for doc in docs:
+                notification = doc.to_dict()
+                notification['id'] = doc.id
+                notifications.append(notification)
+            return notifications
+        except Exception as e:
+            st.error(f"Error fetching notifications: {str(e)}")
+            return []
+    
+    def add_notification(self, notification_data):
+        """Add a notification record"""
+        if not self.db:
+            return True
+        
+        try:
+            self.db.collection('notifications').add(notification_data)
+            return True
+        except Exception as e:
+            st.error(f"Error adding notification: {str(e)}")
+            return False
